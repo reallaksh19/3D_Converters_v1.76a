@@ -1,0 +1,20 @@
+name: InputXML Contract Catalogs
+
+on:
+  pull_request:
+    paths:
+      - 'contracts/inputxml/v1/catalogs/**'
+      - 'scripts/validate-inputxml-contract-catalogs.py'
+      - '.github/workflows/inputxml-contract-catalogs.yml'
+  workflow_dispatch:
+
+jobs:
+  validate-catalogs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate InputXML catalogs
+        run: python scripts/validate-inputxml-contract-catalogs.py

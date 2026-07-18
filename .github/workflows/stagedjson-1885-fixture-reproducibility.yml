@@ -1,0 +1,68 @@
+name: 1885 StagedJSON Fixture Reproducibility
+
+on:
+  pull_request:
+    paths:
+      - 'Benchmarks/1885Sjson/**'
+      - 'tools/generate-1885-stagedjson-fixtures.mjs'
+      - 'tests/stagedjson-1885-fixture-reproducibility.test.mjs'
+      - 'tests/stagedjson-enriched-xml-topology.test.mjs'
+      - 'tests/stagedjson-enriched-xml-1885-benchmark.test.mjs'
+      - 'tabs/xml-cii-2019-standalone/stagedjson-enrichment/**'
+      - 'tabs/stagedjson-to-enrichxml/**'
+      - 'converters/xml-cii2019-core/default-material-map-rows.js'
+      - 'converters/xml-cii2019-core/default-weight-master-rows.js'
+      - '.github/workflows/stagedjson-1885-fixture-reproducibility.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generate-and-verify:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Generate deterministic 1885 fixtures
+        run: node --experimental-default-type=module tools/generate-1885-stagedjson-fixtures.mjs --write
+
+      - name: Commit refreshed benchmark artifacts
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          git add \
+            Benchmarks/1885Sjson/EnrichedSjson \
+            Benchmarks/1885Sjson/EnrichedSjson.audit.json \
+            Benchmarks/1885Sjson/EnrichedSjson.unresolved.csv \
+            Benchmarks/1885Sjson/ExpectedCondensedEnrichedXML \
+            Benchmarks/1885Sjson/fixture-contract-snapshot.json \
+            Benchmarks/1885Sjson/fixture-manifest.json
+          if git diff --cached --quiet; then
+            echo 'Benchmark artifacts are current.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'test: materialize deterministic 1885 enrichment fixtures'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+
+      - name: Run fixture and topology regressions
+        run: |
+          node --experimental-default-type=module --test tests/stagedjson-1885-fixture-reproducibility.test.mjs
+          node --test tests/stagedjson-enriched-xml-topology.test.mjs
+          node --test tests/stagedjson-enriched-xml-1885-benchmark.test.mjs
+
+      - name: Check generator syntax
+        run: |
+          node --check tools/generate-1885-stagedjson-fixtures.mjs
+          node --check tests/stagedjson-1885-fixture-reproducibility.test.mjs

@@ -1,0 +1,153 @@
+name: StagedJSON InputXML
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'converters/scripts/stagedjson_to_inputxml.py'
+      - 'converters/scripts/stagedjson_inputxml_diagnostics.py'
+      - 'converters/scripts/inputxml_bookmark.py'
+      - 'converters/scripts/support_restraint.py'
+      - 'converters/invocation-builder.js'
+      - 'converters/py-worker.js'
+      - 'tabs/model-converters/converter-registry.js'
+      - 'tabs/model-converters/ModelConvertersTab.js'
+      - 'tabs/model-converters/stagedjson-inputxml-diagnostics-panel.js'
+      - 'converters/scripts/test_stagedjson_inputxml_workpack.py'
+      - 'tests/stagedjson-inputxml-workpack.test.js'
+      - 'tests/xml-cii-standalone-source-mode-integration.test.js'
+      - 'docs/inputxml-upstream-audit/stagedjson-to-inputxml_audit.md'
+      - 'docs/inputxml-upstream-audit/stagedjson-inputxml_browser_failure_addendum.md'
+      - 'docs/inputxml-upstream-audit/stagedjson-inputxml_workpack_checks.md'
+      - '.backups/20260713_stagedjson_*'
+      - '.github/workflows/stagedjson-inputxml.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'converters/scripts/stagedjson_to_inputxml.py'
+      - 'converters/scripts/stagedjson_inputxml_diagnostics.py'
+      - 'converters/scripts/inputxml_bookmark.py'
+      - 'converters/scripts/support_restraint.py'
+      - 'converters/invocation-builder.js'
+      - 'converters/py-worker.js'
+      - 'tabs/model-converters/converter-registry.js'
+      - 'tabs/model-converters/ModelConvertersTab.js'
+      - 'tabs/model-converters/stagedjson-inputxml-diagnostics-panel.js'
+      - 'converters/scripts/test_stagedjson_inputxml_workpack.py'
+      - 'tests/stagedjson-inputxml-workpack.test.js'
+      - 'tests/xml-cii-standalone-source-mode-integration.test.js'
+      - 'docs/inputxml-upstream-audit/stagedjson-to-inputxml_audit.md'
+      - 'docs/inputxml-upstream-audit/stagedjson-inputxml_browser_failure_addendum.md'
+      - 'docs/inputxml-upstream-audit/stagedjson-inputxml_workpack_checks.md'
+      - '.backups/20260713_stagedjson_*'
+      - '.github/workflows/stagedjson-inputxml.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    name: Focused StagedJSON InputXML gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          npm ci --omit=dev
+          python -m pip install --disable-pip-version-check pytest
+      - name: Work Pack structure
+        run: |
+          test ! -e scripts/stagedjson-inputxml-workpack-patch.py
+          test ! -e scripts/repair-stagedjson-inputxml-patch.py
+          test ! -e .github/workflows/stagedjson-inputxml-patch.yml
+          test ! -e scripts/stagedjson-failed-diagnostics-patch.py
+          test ! -e .github/workflows/stagedjson-failed-diagnostics-patch.yml
+          test "$(wc -l < converters/scripts/stagedjson_inputxml_diagnostics.py)" -le 300
+          test "$(wc -l < tabs/model-converters/stagedjson-inputxml-diagnostics-panel.js)" -le 300
+      - name: Syntax checks
+        run: |
+          python -m py_compile \
+            converters/scripts/inputxml_bookmark.py \
+            converters/scripts/stagedjson_inputxml_diagnostics.py \
+            converters/scripts/stagedjson_to_inputxml.py \
+            converters/scripts/test_stagedjson_inputxml_workpack.py
+          node --check converters/invocation-builder.js
+          node --check converters/py-worker.js
+          node --check tabs/model-converters/converter-registry.js
+          node --check tabs/model-converters/ModelConvertersTab.js
+          node --check tabs/model-converters/stagedjson-inputxml-diagnostics-panel.js
+          node --check tests/stagedjson-inputxml-workpack.test.js
+          node --check tests/xml-cii-standalone-source-mode-integration.test.js
+      - name: Focused authority and integration tests
+        id: focused_tests
+        shell: bash
+        run: |
+          set +e
+          {
+            python -m pytest -q converters/scripts/test_stagedjson_inputxml_workpack.py &&
+            python converters/scripts/test_coord_transform.py &&
+            python converters/scripts/test_chain_g4_g5.py &&
+            node tests/stagedjson-inputxml-workpack.test.js &&
+            node tests/xml-cii-standalone-source-mode-integration.test.js
+          } > stagedjson-inputxml-focused-tests.log 2>&1
+          status=$?
+          cat stagedjson-inputxml-focused-tests.log
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload focused test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stagedjson-inputxml-focused-tests
+          path: stagedjson-inputxml-focused-tests.log
+      - name: Enforce focused test success
+        if: steps.focused_tests.outputs.status != '0'
+        run: exit 1
+
+  baseline:
+    name: Named base vs head regression ledger
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout head with history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Prepare base and dependencies
+        run: |
+          git fetch origin main
+          git worktree add --detach /tmp/stagedjson-inputxml-base origin/main
+          npm ci --omit=dev
+          npm ci --prefix /tmp/stagedjson-inputxml-base --omit=dev
+          python -m pip install --disable-pip-version-check pytest
+      - name: Compare all named JavaScript and Python tests
+        run: |
+          python scripts/xml-builder-inputxml-baseline-gate.py \
+            --base /tmp/stagedjson-inputxml-base \
+            --head . \
+            --output artifacts/stagedjson-inputxml-baseline.json
+      - name: Upload baseline ledger
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stagedjson-inputxml-baseline
+          path: artifacts/stagedjson-inputxml-baseline.json

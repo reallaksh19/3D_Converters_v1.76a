@@ -1,0 +1,50 @@
+name: XML CII Standalone Trace UI
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'tabs/xml-cii-2019-standalone/xml-cii-trace-export.js'
+      - 'tabs/xml-cii-2019-standalone/ui-adapted/xml-cii-adapted-resolver-json-trace.js'
+      - 'tabs/xml-cii-2019-standalone/ui-adapted/xml-cii-adapted-events.js'
+      - 'tests/xml-cii-standalone-resolver-json-trace.test.js'
+      - 'tests/xml-cii-standalone-trace-export.test.js'
+      - '.github/workflows/xml-cii-standalone-trace-ui.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  trace-ui-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          show-progress: false
+
+      - name: Verify checked-out head SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run standalone static checks
+        run: node tests/xml-cii-standalone-static.test.js
+
+      - name: Run Resolver JSON Trace checks
+        run: node tests/xml-cii-standalone-resolver-json-trace.test.js
+
+      - name: Run trace export checks
+        run: node tests/xml-cii-standalone-trace-export.test.js
+
+      - name: Run implementation guard checks
+        run: node tests/xml-cii-standalone-implementation-guard.test.js

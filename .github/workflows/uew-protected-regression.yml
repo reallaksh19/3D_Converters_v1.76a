@@ -1,0 +1,68 @@
+name: UEW Protected Regression
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'core/app-standalone-runtime.js'
+      - 'tabs/universal-enrichment-workbench-tab.js'
+      - 'tabs/universal-enrichment-workbench/**'
+      - 'tests/universal-enrichment-workbench-*.test.js'
+      - 'tests/universal-enrichment-workbench-test-helpers.js'
+      - '.github/workflows/uew-protected-regression.yml'
+      - '.github/workflows/xml-cii-standalone-mission01.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  protected-regression:
+    name: UEW isolated capability and XML CII retention
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Verify checked-out head SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run UEW source-intake and retention tests
+        run: node --test tests/universal-enrichment-workbench-*.test.js
+
+      - name: Run stable XML CII retention checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/xml-cii-standalone-static.test.js
+          node tests/xml-cii-inputxml-enrichment-behavior.test.js
+          node tests/xml-cii-standalone-preview-diagnostics-audit.test.js
+          node tests/xml-cii-standalone-weight-match.test.js
+          node tests/xml-cii-standalone-source-mode-integration.test.js
+          node tests/xml-cii-standalone-implementation-guard.test.js
+
+      - name: Verify protected XML CII production paths are untouched
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='${{ github.event.pull_request.base.sha }}'
+          head='${{ github.event.pull_request.head.sha }}'
+          changed="$(git diff --name-only "$base...$head")"
+          printf '%s\n' "$changed"
+          protected="$(printf '%s\n' "$changed" | grep -E '^(tabs/xml-cii-2019-standalone-tab\.js|tabs/xml-cii-2019-standalone/|converters/xml-cii-2019-standalone/|converters/scripts/inputxml_to_cii2019\.py|tabs/model-converters/.*xml-cii|tabs/model-converters/converters/xmltocii2019|converters/scripts/xml_to_cii2019\.py)' || true)"
+          if [ -n "$protected" ]; then
+            printf '%s\n' "$protected" >&2
+            echo 'Protected XML CII production path changed.' >&2
+            exit 1
+          fi

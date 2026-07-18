@@ -1,0 +1,138 @@
+name: XML Builder InputXML
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tabs/xml-builder-tab.js'
+      - 'tabs/xml-builder-diagnostics-view.js'
+      - 'tabs/model-converters/custom-input/**'
+      - 'tabs/model-converters/xml-cii-node-to-inputxml-*.js'
+      - 'converters/xml-cii2019-core/custom-input-*.js'
+      - 'converters/xml-cii2019-core/restraint-type-*.js'
+      - 'converters/scripts/inputxml_to_cii2019.py'
+      - 'tests/xml-builder-inputxml-*'
+      - 'tests/xml-cii-node-to-inputxml-*'
+      - 'scripts/xml-builder-inputxml-baseline-gate.py'
+      - 'docs/inputxml-upstream-audit/xml-builder*'
+      - '.backups/20260713_xml_builder*'
+      - '.github/workflows/xml-builder-inputxml.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tabs/xml-builder-tab.js'
+      - 'tabs/xml-builder-diagnostics-view.js'
+      - 'tabs/model-converters/custom-input/**'
+      - 'tabs/model-converters/xml-cii-node-to-inputxml-*.js'
+      - 'converters/xml-cii2019-core/custom-input-*.js'
+      - 'converters/xml-cii2019-core/restraint-type-*.js'
+      - 'converters/scripts/inputxml_to_cii2019.py'
+      - 'tests/xml-builder-inputxml-*'
+      - 'tests/xml-cii-node-to-inputxml-*'
+      - 'scripts/xml-builder-inputxml-baseline-gate.py'
+      - 'docs/inputxml-upstream-audit/xml-builder*'
+      - '.backups/20260713_xml_builder*'
+      - '.github/workflows/xml-builder-inputxml.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    name: Focused XML Builder gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install JavaScript runtime dependencies
+        run: npm ci --omit=dev
+      - name: Work Pack structure
+        run: |
+          test ! -e scripts/xml-builder-inputxml-workpack-patch.mjs
+          test ! -e scripts/repair-xml-builder-inputxml-patch.mjs
+          test ! -e .github/workflows/xml-builder-inputxml-patch.yml
+          test ! -e .github/workflows/xml-builder-restraint-authority-correction.yml
+          test "$(wc -l < converters/xml-cii2019-core/custom-input-diagnostics.js)" -le 300
+          test "$(wc -l < tabs/model-converters/xml-cii-node-to-inputxml-audit.js)" -le 300
+          test "$(wc -l < tabs/xml-builder-diagnostics-view.js)" -le 300
+          test "$(wc -l < scripts/xml-builder-inputxml-baseline-gate.py)" -le 300
+          if grep -R "export default" \
+            converters/xml-cii2019-core/custom-input-diagnostics.js \
+            tabs/model-converters/xml-cii-node-to-inputxml-audit.js \
+            tabs/xml-builder-diagnostics-view.js; then
+            echo 'New Work Pack modules must use named exports.' >&2
+            exit 1
+          fi
+          if grep -q 'RESTRAINT_TYPE_MAP' tabs/model-converters/xml-cii-node-to-inputxml-core.js; then
+            echo 'Shared core must use the Python-synchronized restraint mapper, not a private map.' >&2
+            exit 1
+          fi
+      - name: JavaScript syntax checks
+        run: |
+          node --check converters/xml-cii2019-core/custom-input-table-parser.js
+          node --check converters/xml-cii2019-core/custom-input-model.js
+          node --check converters/xml-cii2019-core/custom-input-xml-builder.js
+          node --check converters/xml-cii2019-core/custom-input-api.js
+          node --check converters/xml-cii2019-core/custom-input-diagnostics.js
+          node --check tabs/model-converters/xml-cii-node-to-inputxml-audit.js
+          node --check tabs/model-converters/xml-cii-node-to-inputxml-core.js
+          node --check tabs/model-converters/custom-input/custom-input-panel.js
+          node --check tabs/xml-builder-diagnostics-view.js
+          node --check tabs/xml-builder-tab.js
+          node --check tests/xml-builder-inputxml-ui.test.js
+          node --check tests/xml-builder-inputxml-diagnostics.test.mjs
+          python -m py_compile scripts/xml-builder-inputxml-baseline-gate.py
+      - name: Focused end-to-end tests
+        run: |
+          node tests/xml-cii-node-to-inputxml-core.test.js
+          node tests/xml-cii-node-to-inputxml-benchmark.test.js
+          node tests/xml-cii-node-to-inputxml-fillers.test.js
+          node tests/xml-builder-inputxml-ui.test.js
+          node tests/xml-builder-inputxml-diagnostics.test.mjs
+
+  baseline:
+    name: Named base vs head regression ledger
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout head with history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Prepare base and dependencies
+        run: |
+          git fetch origin main
+          git worktree add --detach /tmp/xml-builder-base origin/main
+          npm ci --omit=dev
+          npm ci --prefix /tmp/xml-builder-base --omit=dev
+          python -m pip install --disable-pip-version-check pytest
+      - name: Compare all named JavaScript and Python tests
+        run: |
+          python scripts/xml-builder-inputxml-baseline-gate.py \
+            --base /tmp/xml-builder-base \
+            --head . \
+            --output artifacts/xml-builder-inputxml-baseline.json
+      - name: Upload baseline ledger
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xml-builder-inputxml-baseline
+          path: artifacts/xml-builder-inputxml-baseline.json

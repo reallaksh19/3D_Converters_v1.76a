@@ -1,0 +1,53 @@
+name: XML CII Standalone Table Trace
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'tabs/xml-cii-2019-standalone/xml-cii-table-trace-source.js'
+      - 'tabs/xml-cii-2019-standalone/xml-cii-table-trace-table.js'
+      - 'tabs/xml-cii-2019-standalone/xml-cii-table-trace-match.js'
+      - 'tabs/xml-cii-2019-standalone/xml-cii-table-trace-config.js'
+      - 'tabs/xml-cii-2019-standalone/ui-adapted/xml-cii-adapted-table-trace-events.js'
+      - 'tabs/xml-cii-2019-standalone/ui-adapted/xml-cii-adapted-table-trace-panel.js'
+      - 'tests/xml-cii-table-trace-source.test.js'
+      - 'tests/xml-cii-standalone-resolver-json-trace.test.js'
+      - '.github/workflows/xml-cii-standalone-table-trace.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  table-trace-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          show-progress: false
+
+      - name: Verify checked-out head SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run standalone static checks
+        run: node tests/xml-cii-standalone-static.test.js
+
+      - name: Run CSV XLS table trace checks
+        run: node tests/xml-cii-table-trace-source.test.js
+
+      - name: Run Resolver JSON Trace checks
+        run: node tests/xml-cii-standalone-resolver-json-trace.test.js
+
+      - name: Run implementation guard checks
+        run: node tests/xml-cii-standalone-implementation-guard.test.js

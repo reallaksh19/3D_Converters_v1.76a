@@ -1,0 +1,103 @@
+name: PSI116 Component Topology
+
+on:
+  pull_request:
+    paths:
+      - 'converters/scripts/xml_to_cii2019_contracted_direction.py'
+      - 'converters/scripts/xml_to_cii2019.py'
+      - 'converters/scripts/xml_to_cii2019_direction.py'
+      - 'converters/scripts/xml_to_cii2019_patched.py'
+      - 'tests/xml_to_cii_psi116_component_topology_regression.py'
+      - 'tests/xml_to_cii_short_span_contraction_regression.py'
+      - 'Benchmarks/1885Sjson/FirstpassXML'
+      - 'Benchmarks/1885Sjson/Firstpass CII'
+      - '.github/workflows/psi116-component-topology.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  component-topology:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Syntax check
+        run: |
+          python -m py_compile \
+            converters/scripts/xml_to_cii2019.py \
+            converters/scripts/xml_to_cii2019_patched.py \
+            converters/scripts/xml_to_cii2019_direction.py \
+            converters/scripts/xml_to_cii2019_contracted_direction.py \
+            tests/xml_to_cii_psi116_component_topology_regression.py
+
+      - name: Component occurrence and 1885 regression
+        id: topology_regression
+        shell: bash
+        run: |
+          set +e
+          python tests/xml_to_cii_psi116_component_topology_regression.py > /tmp/psi116-component-topology-test.log 2>&1
+          status=$?
+          cat /tmp/psi116-component-topology-test.log
+          echo "exit_status=$status" >> "$GITHUB_OUTPUT"
+          exit "$status"
+
+      - name: Upload component topology test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: psi116-component-topology-test-log
+          path: /tmp/psi116-component-topology-test.log
+          if-no-files-found: error
+
+      - name: Existing short-span regression
+        run: python tests/xml_to_cii_short_span_contraction_regression.py
+
+      - name: Generate and validate real Firstpass CII
+        run: |
+          python converters/scripts/xml_to_cii2019_contracted_direction.py \
+            --input Benchmarks/1885Sjson/FirstpassXML \
+            --output /tmp/firstpass-component-topology.cii \
+            --coords-mode first \
+            --diagnostics-out /tmp/firstpass-component-topology.log
+          test -s /tmp/firstpass-component-topology.cii
+          grep -q 'PSI116 COMPONENT TOPOLOGY' /tmp/firstpass-component-topology.log
+          cmp --silent /tmp/firstpass-component-topology.cii 'Benchmarks/1885Sjson/Firstpass CII'
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('/tmp/firstpass-component-topology.cii').read_text(encoding='utf-8')
+          element_body = text.split('#$ ELEMENTS', 1)[1].split('#$', 1)[0]
+          element_rows = [line for line in element_body.splitlines() if line.strip()]
+          assert len(element_rows) % 15 == 0, len(element_rows)
+          pairs = []
+          for index in range(0, len(element_rows), 15):
+              values = element_rows[index].split()
+              pairs.append((int(float(values[0])), int(float(values[1]))))
+          assert (2240, 1570) in pairs, pairs
+          assert (1570, 2280) in pairs, pairs
+          assert (1570, 1590) in pairs, pairs
+          assert not any(2260 in pair for pair in pairs), pairs
+
+          bend_body = text.split('#$ BEND', 1)[1].split('#$', 1)[0]
+          bend_rows = [line for line in bend_body.splitlines() if line.strip()]
+          assert len(bend_rows) % 3 == 0, len(bend_rows)
+          radii = [float(bend_rows[index].split()[0]) for index in range(0, len(bend_rows), 3)]
+          assert radii.count(305.0) >= 2, radii
+          print(f'Connected node pairs verified; BEND radii: {radii}')
+          PY
+
+      - name: Upload generated Firstpass CII proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: firstpass-component-topology-proof
+          path: |
+            /tmp/firstpass-component-topology.cii
+            /tmp/firstpass-component-topology.log
+          if-no-files-found: error

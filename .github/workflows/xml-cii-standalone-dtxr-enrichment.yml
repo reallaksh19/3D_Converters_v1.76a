@@ -1,0 +1,77 @@
+name: XML CII Standalone DTXR Enrichment
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'converters/xml-cii2019-core/dtxr-resolver.js'
+      - 'tabs/xml-cii-2019-standalone/xml-cii-trace-resolution-ledger.js'
+      - 'tabs/xml-cii-2019-standalone/xml-cii-resolver-json-trace.js'
+      - 'tabs/xml-cii-2019-standalone/xml-cii-standalone-dtxr-enrichment.js'
+      - 'tabs/xml-cii-2019-standalone/xml-cii-standalone-run-parity.js'
+      - 'tests/xml-cii-standalone-dtxr-enrichment.test.js'
+      - 'tests/xml-cii-standalone-dtxr-pos-precedence.test.js'
+      - 'tests/xml-cii-standalone-trace-ledger.test.js'
+      - 'tests/xml-cii-standalone-parity.test.js'
+      - '.github/workflows/xml-cii-standalone-dtxr-enrichment.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  dtxr-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          show-progress: false
+
+      - name: Verify checked-out head SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run standalone static checks
+        run: node tests/xml-cii-standalone-static.test.js
+
+      - name: Run InputXML enrichment behavior checks
+        run: node tests/xml-cii-inputxml-enrichment-behavior.test.js
+
+      - name: Run focused DTXR enrichment checks
+        run: node tests/xml-cii-standalone-dtxr-enrichment.test.js
+
+      - name: Run DTXR_POS precedence checks
+        run: node tests/xml-cii-standalone-dtxr-pos-precedence.test.js
+
+      - name: Run authoritative trace ledger checks
+        run: node tests/xml-cii-standalone-trace-ledger.test.js
+
+      - name: Run implementation guard checks
+        run: node tests/xml-cii-standalone-implementation-guard.test.js
+
+      - name: Run parity checks
+        shell: bash
+        run: |
+          set +e
+          node tests/xml-cii-standalone-parity.test.js > parity-output.log 2>&1
+          status=$?
+          cat parity-output.log
+          exit "$status"
+
+      - name: Upload parity output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xml-cii-dtxr-parity-output
+          path: parity-output.log
+          if-no-files-found: ignore

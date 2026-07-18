@@ -1,0 +1,78 @@
+name: InputXML End-to-End Regression Matrix
+
+on:
+  pull_request:
+    paths:
+      - 'contracts/inputxml/v1/**'
+      - 'scripts/inputxml_canonical_compiler.py'
+      - 'scripts/inputxml_compiler/**'
+      - 'scripts/inputxml_assurance_ledger.py'
+      - 'scripts/inputxml_e2e_regression_matrix.py'
+      - 'converters/scripts/inputxml_to_cii2019.py'
+      - 'converters/scripts/inputxml_to_cii2019_assured*.py'
+      - 'converters/scripts/cii2019_reparse_proof.py'
+      - 'tests/test_inputxml_*adapter.py'
+      - 'tests/test_inputxml_cii_*.py'
+      - 'tests/test_inputxml_e2e_regression_matrix.py'
+      - 'tabs/model-converters/xml-cii-node-to-inputxml-*.js'
+      - 'tabs/model-converters/converters/component-topology/**'
+      - 'tabs/stagedjson-to-enrichxml/**'
+      - 'uxml/**'
+      - 'rvm-pcf-extract/**'
+      - '.github/workflows/inputxml-e2e-regression-matrix.yml'
+  workflow_dispatch:
+
+jobs:
+  validate-e2e-matrix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install full-chain validation runtime
+        run: python -m pip install --disable-pip-version-check jsonschema==4.23.0 lxml==5.4.0 pypdf==5.4.0
+      - name: Validate PR-G module syntax
+        run: |
+          python -m py_compile \
+            converters/scripts/cii2019_reparse_proof.py \
+            scripts/inputxml_e2e_regression_matrix.py \
+            tests/test_inputxml_cii_reparse_proof.py \
+            tests/test_inputxml_e2e_regression_matrix.py
+      - name: Run independent CII reparse tests
+        id: reparse
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m unittest -v tests/test_inputxml_cii_reparse_proof.py \
+            2>&1 | tee "$RUNNER_TEMP/inputxml-prg-reparse.log"
+      - name: Run all-dialect end-to-end matrix
+        id: matrix
+        continue-on-error: true
+        shell: bash
+        env:
+          INPUTXML_PRG_OUTPUT_DIR: ${{ runner.temp }}/inputxml-prg-matrix
+        run: |
+          set -o pipefail
+          mkdir -p "$INPUTXML_PRG_OUTPUT_DIR"
+          python -m unittest -v tests/test_inputxml_e2e_regression_matrix.py \
+            2>&1 | tee "$RUNNER_TEMP/inputxml-prg-matrix.log"
+      - name: Upload PR-G matrix and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: inputxml-prg-e2e-matrix
+          path: |
+            ${{ runner.temp }}/inputxml-prg-reparse.log
+            ${{ runner.temp }}/inputxml-prg-matrix.log
+            ${{ runner.temp }}/inputxml-prg-matrix
+          if-no-files-found: warn
+      - name: Enforce PR-G aggregate gate
+        if: always()
+        shell: bash
+        run: |
+          echo "reparse=${{ steps.reparse.outcome }}"
+          echo "matrix=${{ steps.matrix.outcome }}"
+          test "${{ steps.reparse.outcome }}" = "success"
+          test "${{ steps.matrix.outcome }}" = "success"

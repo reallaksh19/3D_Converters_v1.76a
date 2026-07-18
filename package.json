@@ -1,0 +1,12 @@
+{
+  "scripts": {
+    "build:topology-browser-core": "node scripts/build-topology-browser-core.mjs ../XML_Compare_Utilities/vendor/3d-converters/topology-browser-core.mjs ../XML_Compare_Utilities/vendor/3d-converters/topology-browser-core.manifest.json"
+  },
+  "dependencies": {
+    "pyodide": "^0.27.2",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1"
+  }
+}

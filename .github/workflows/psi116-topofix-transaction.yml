@@ -1,0 +1,149 @@
+name: PSI116 TopoFix Transaction
+
+on:
+  pull_request:
+    paths:
+      - "converters/psi116_topology_resolver/**"
+      - "tests/psi116_topofix_transaction.py"
+      - "tests/psi116_topology_resolver_foundation.py"
+      - "converters/scripts/xml_to_cii2019_contracted_direction.py"
+      - "Benchmarks/1885Sjson/FirstpassXML"
+      - "Benchmarks/1885Sjson/Firstpass CII"
+      - ".github/workflows/psi116-topofix-transaction.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Syntax check
+        run: |
+          python -m py_compile \
+            converters/psi116_topology_resolver/__init__.py \
+            converters/psi116_topology_resolver/models.py \
+            converters/psi116_topology_resolver/parser.py \
+            converters/psi116_topology_resolver/analysis.py \
+            converters/psi116_topology_resolver/geometry_analysis.py \
+            converters/psi116_topology_resolver/planner.py \
+            converters/psi116_topology_resolver/resolver.py \
+            converters/psi116_topology_resolver/transaction.py \
+            converters/psi116_topology_resolver/apply_topofix.py \
+            tests/psi116_topology_resolver_foundation.py \
+            tests/psi116_topofix_transaction.py
+
+      - name: Resolver foundation regression
+        run: python tests/psi116_topology_resolver_foundation.py
+
+      - name: TopoFix transaction regression
+        shell: bash
+        run: |
+          set +e
+          python tests/psi116_topofix_transaction.py > "$RUNNER_TEMP/psi116-topofix-test.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/psi116-topofix-test.log"
+          exit "$status"
+
+      - name: Generate selected real 1885 TopoFix sidecars
+        run: |
+          mkdir -p "$RUNNER_TEMP/psi116-topofix"
+          python - <<'PY'
+          from pathlib import Path
+          from converters.psi116_topology_resolver import resolve_psi116
+          from converters.psi116_topology_resolver.transaction import (
+              TransactionPolicy,
+              apply_topofix_transaction,
+              write_topofix_outputs,
+          )
+
+          fixture = Path('Benchmarks/1885Sjson/FirstpassXML')
+          result = resolve_psi116(fixture)
+
+          def action_for(disposition, nodes):
+              expected = set(nodes)
+              return next(
+                  action for action in result.fix_actions
+                  if action.disposition == disposition
+                  and set(action.node_numbers) == expected
+              )
+
+          actions = (
+              action_for('ALIAS_COINCIDENT_NODE', {1570, 2260}),
+              action_for('SAFE_DROP_PIPE_GEOMETRY', {1600, 1610}),
+          )
+          transaction = apply_topofix_transaction(
+              result,
+              policy=TransactionPolicy(selected_action_ids=tuple(action.action_id for action in actions)),
+          )
+          assert transaction.committed, transaction.reject_reasons
+          assert len(transaction.operations) == 2, transaction.operations
+          assert {operation.operation for operation in transaction.operations} == {
+              'ALIAS_NODE_NUMBER',
+              'REMOVE_PLAIN_PIPE_NODE_RECORD',
+          }, transaction.operations
+          assert all(check.passed for check in transaction.checks if check.blocking), transaction.checks
+          outputs = write_topofix_outputs(
+              transaction,
+              Path('${{ runner.temp }}') / 'psi116-topofix',
+              stem='FirstpassXML',
+          )
+          assert outputs[2] is not None and outputs[2].is_file(), outputs
+          PY
+
+      - name: Convert TopoFixed XML through unchanged CII engine
+        run: |
+          python converters/scripts/xml_to_cii2019_contracted_direction.py \
+            --input "$RUNNER_TEMP/psi116-topofix/FirstpassXML.topofix.xml" \
+            --output "$RUNNER_TEMP/psi116-topofix/FirstpassXML.topofix.cii" \
+            --coords-mode first \
+            --diagnostics-out "$RUNNER_TEMP/psi116-topofix/FirstpassXML.topofix.cii.log"
+          test -s "$RUNNER_TEMP/psi116-topofix/FirstpassXML.topofix.cii"
+          cmp --silent "$RUNNER_TEMP/psi116-topofix/FirstpassXML.topofix.cii" "Benchmarks/1885Sjson/Firstpass CII"
+          python - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse(Path('${{ runner.temp }}') / 'psi116-topofix' / 'FirstpassXML.topofix.xml').getroot()
+          local = lambda tag: tag.rsplit('}', 1)[-1]
+          numbers = [
+              int(next(child for child in node if local(child.tag) == 'NodeNumber').text)
+              for node in root.iter() if local(node.tag) == 'Node'
+          ]
+          assert 1600 not in numbers, numbers
+          assert 2260 not in numbers, numbers
+          assert numbers.count(1570) >= 2, numbers
+          assert numbers.count(1610) >= 1, numbers
+
+          text = (Path('${{ runner.temp }}') / 'psi116-topofix' / 'FirstpassXML.topofix.cii').read_text(encoding='utf-8')
+          element_body = text.split('#$ ELEMENTS', 1)[1].split('#$', 1)[0]
+          rows = [line for line in element_body.splitlines() if line.strip()]
+          pairs = [(int(float(rows[index].split()[0])), int(float(rows[index].split()[1]))) for index in range(0, len(rows), 15)]
+          assert (2240, 1570) in pairs
+          assert (1570, 2280) in pairs
+          assert (1570, 1590) in pairs
+          assert not any(2260 in pair or 1600 in pair for pair in pairs)
+
+          bend_body = text.split('#$ BEND', 1)[1].split('#$', 1)[0]
+          bend_rows = [line for line in bend_body.splitlines() if line.strip()]
+          radii = [float(bend_rows[index].split()[0]) for index in range(0, len(bend_rows), 3)]
+          assert len(radii) == 14, radii
+          assert radii.count(305.0) >= 2, radii
+          PY
+
+      - name: Upload TopoFix evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: psi116-topofix-transaction
+          path: |
+            ${{ runner.temp }}/psi116-topofix
+            ${{ runner.temp }}/psi116-topofix-test.log
+          if-no-files-found: error

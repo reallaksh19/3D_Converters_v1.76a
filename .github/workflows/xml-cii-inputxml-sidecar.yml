@@ -1,0 +1,124 @@
+name: XML CII InputXML Sidecar
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'converters/py-worker.js'
+      - 'converters/xml-cii-inputxml-sidecar-worker.js'
+      - 'converters/scripts/xml_to_inputxml_debug.py'
+      - 'converters/scripts/xml_to_cii_inputxml_sidecar_diagnostics.py'
+      - 'converters/scripts/test_xml_to_inputxml_debug.py'
+      - 'converters/scripts/test_xml_to_cii_inputxml_sidecar_workpack.py'
+      - 'tabs/model-converters/ModelConvertersTab.js'
+      - 'tabs/model-converters/xml-cii-inputxml-sidecar-diagnostics-panel.js'
+      - 'tests/xml-cii-inputxml-sidecar-workpack.test.js'
+      - 'tests/xml-cii-standalone-source-mode-integration.test.js'
+      - 'scripts/xml-cii-inputxml-sidecar-baseline-gate.mjs'
+      - 'scripts/xml-cii-inputxml-sidecar-structure-check.py'
+      - 'docs/inputxml-upstream-audit/xml-to-cii-inputxml-sidecar*'
+      - '.backups/20260713_xml_to_cii_inputxml_sidecar_workpack_backup.json'
+      - '.github/workflows/xml-cii-inputxml-sidecar.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'converters/py-worker.js'
+      - 'converters/xml-cii-inputxml-sidecar-worker.js'
+      - 'converters/scripts/xml_to_inputxml_debug.py'
+      - 'converters/scripts/xml_to_cii_inputxml_sidecar_diagnostics.py'
+      - 'tabs/model-converters/ModelConvertersTab.js'
+      - 'tabs/model-converters/xml-cii-inputxml-sidecar-diagnostics-panel.js'
+      - '.github/workflows/xml-cii-inputxml-sidecar.yml'
+
+jobs:
+  focused:
+    name: Focused sidecar authority gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          npm ci --omit=dev
+          python -m pip install pytest
+      - name: Work Pack structure
+        run: |
+          set +e
+          {
+            python scripts/xml-cii-inputxml-sidecar-structure-check.py
+            git diff --check origin/main...HEAD
+          } > xml-cii-sidecar-structure.log 2>&1
+          status=$?
+          cat xml-cii-sidecar-structure.log
+          echo "$status" > xml-cii-sidecar-structure.status
+          exit "$status"
+      - name: Upload structure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xml-cii-inputxml-sidecar-structure
+          path: |
+            xml-cii-sidecar-structure.log
+            xml-cii-sidecar-structure.status
+      - name: Syntax checks
+        run: |
+          node --check converters/xml-cii-inputxml-sidecar-worker.js
+          node --check converters/py-worker.js
+          node --check tabs/model-converters/xml-cii-inputxml-sidecar-diagnostics-panel.js
+          node --check tabs/model-converters/ModelConvertersTab.js
+          node --check tests/xml-cii-inputxml-sidecar-workpack.test.js
+          node --check scripts/xml-cii-inputxml-sidecar-baseline-gate.mjs
+          python -m py_compile converters/scripts/xml_to_inputxml_debug.py
+          python -m py_compile converters/scripts/xml_to_cii_inputxml_sidecar_diagnostics.py
+      - name: Focused artifact and browser contracts
+        run: |
+          node tests/xml-cii-inputxml-sidecar-workpack.test.js
+          node tests/xml-cii-standalone-source-mode-integration.test.js
+          python -m pytest -q \
+            converters/scripts/test_xml_to_cii_inputxml_sidecar_workpack.py \
+            converters/scripts/test_xml_to_inputxml_debug.py
+
+  baseline:
+    name: Named JavaScript and Python baseline ledger
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout head with history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Prepare base and dependencies
+        run: |
+          npm ci --omit=dev
+          python -m pip install pytest
+          BASE_WORKTREE="$GITHUB_WORKSPACE/../3D_Converters-base"
+          git worktree add "$BASE_WORKTREE" origin/main
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$BASE_WORKTREE/node_modules"
+          echo "BASE_WORKTREE=$BASE_WORKTREE" >> "$GITHUB_ENV"
+      - name: Compare named tests
+        run: node scripts/xml-cii-inputxml-sidecar-baseline-gate.mjs . "$BASE_WORKTREE" xml-cii-sidecar-baseline.json
+      - name: Upload baseline ledger
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xml-cii-inputxml-sidecar-baseline
+          path: xml-cii-sidecar-baseline.json

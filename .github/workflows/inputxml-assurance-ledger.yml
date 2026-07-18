@@ -1,0 +1,36 @@
+name: InputXML Assurance Ledger
+
+on:
+  pull_request:
+    paths:
+      - 'contracts/inputxml/v1/**'
+      - 'scripts/inputxml_assurance_ledger.py'
+      - 'tests/test_inputxml_assurance_ledger.py'
+      - 'tests/test_inputxml_assurance_integration.py'
+      - 'tabs/model-converters/converters/component-topology/**'
+      - 'tests/component-topology-*.test.*'
+      - '.github/workflows/inputxml-assurance-ledger.yml'
+  workflow_dispatch:
+
+jobs:
+  validate-assurance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install assurance validation runtime
+        run: python -m pip install --disable-pip-version-check jsonschema==4.23.0 lxml==5.4.0 pypdf==5.4.0
+      - name: Validate contract catalogs and schema suite
+        run: |
+          python scripts/validate-inputxml-contract-catalogs.py
+          python scripts/validate-inputxml-schema-suite.py
+      - name: Validate topology parity architecture
+        run: |
+          node tests/component-topology-static.test.js
+          node tests/component-topology-parity.test.mjs
+          node tests/component-topology-artifacts-1885-nc.test.mjs
+          node tests/component-topology-artifacts-asim-1835.test.mjs
+      - name: Run assurance-ledger tests
+        run: python -m unittest -v tests/test_inputxml_assurance_ledger.py tests/test_inputxml_assurance_integration.py

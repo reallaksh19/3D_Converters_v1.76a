@@ -1,0 +1,41 @@
+name: Component Topology Parity
+
+on:
+  pull_request:
+    paths:
+      - 'tabs/model-converters/converters/component-topology/**'
+      - 'tabs/stagedjson-to-enrichxml/**'
+      - 'tests/component-topology-**'
+      - 'Benchmarks/1885_NC/**'
+      - '.github/workflows/component-topology-support-policy.yml'
+  workflow_dispatch:
+
+jobs:
+  topology-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Validate production module syntax
+        run: |
+          for file in tabs/model-converters/converters/component-topology/*.js; do node --check "$file"; done
+      - name: Validate static ownership contracts
+        run: node tests/component-topology-static.test.js
+      - name: Validate exact three-way parity mutations
+        run: node tests/component-topology-parity.test.mjs
+      - name: Validate focused support policy
+        run: node tests/component-topology-support-policy.test.mjs
+      - name: Validate real 1885_NC topology parity
+        run: |
+          set -o pipefail
+          node tests/component-topology-artifacts-1885-nc.test.mjs 2>&1 | tee component-topology-1885.log
+      - name: Upload real-fixture evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: component-topology-1885-parity
+          path: component-topology-1885.log
+      - name: Validate ASIM-1835 compatibility
+        run: node tests/component-topology-artifacts-asim-1835.test.mjs

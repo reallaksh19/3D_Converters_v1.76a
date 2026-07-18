@@ -1,0 +1,63 @@
+name: XML CII Standalone Test Fixture Closure
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'tests/xml-cii-standalone-esm-fixture-helper.js'
+      - 'tests/xml-cii-standalone-workflow-api.test.js'
+      - 'tests/xml-cii-standalone-import-masters.test.js'
+      - 'tests/xml-cii-standalone-parity.test.js'
+      - '.github/workflows/xml-cii-standalone-test-fixture-closure.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  fixture-closure-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Verify checked-out head SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run workflow API fixture check
+        run: node tests/xml-cii-standalone-workflow-api.test.js
+
+      - name: Run Import Masters fixture check
+        id: import_masters
+        continue-on-error: true
+        shell: bash
+        run: node tests/xml-cii-standalone-import-masters.test.js > import-masters.log 2>&1
+
+      - name: Upload Import Masters output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xml-cii-import-masters-output
+          path: import-masters.log
+          if-no-files-found: error
+
+      - name: Fail on Import Masters regression
+        if: steps.import_masters.outcome == 'failure'
+        shell: bash
+        run: |
+          cat import-masters.log
+          exit 1
+
+      - name: Run parity fixture check
+        run: node tests/xml-cii-standalone-parity.test.js

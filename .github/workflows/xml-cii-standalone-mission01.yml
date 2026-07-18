@@ -1,0 +1,132 @@
+name: XML CII Standalone Mission 01
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'tabs/xml-cii-2019-standalone/**'
+      - 'tabs/xml-cii-2019-standalone-tab.js'
+      - 'tabs/xml-cii-2019-standalone-tab.css'
+      - 'converters/xml-cii2019-core/dtxr-resolver.js'
+      - 'tests/xml-cii-standalone-*.test.js'
+      - 'tests/xml-cii-inputxml-enrichment-behavior.test.js'
+      - 'tests/fixtures/xml-cii-standalone/**'
+      - 'docs/xml-cii-2019-standalone-production-readiness.md'
+      - 'docs/xml-cii-2019-standalone-parity.md'
+      - 'docs/xml-cii-2019-standalone-live-proof.md'
+      - '.github/workflows/xml-cii-standalone-mission01.yml'
+  push:
+    branches:
+      - xml-cii-standalone-ui-adapted-guarded
+      - mission-04-live-proof-readiness
+
+jobs:
+  mission-01-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          show-progress: false
+
+      - name: Determine whether Mission 01 applies
+        id: scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo 'run_suite=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          base='${{ github.event.pull_request.base.sha }}'
+          head='${{ github.event.pull_request.head.sha }}'
+          changed="$(git diff --name-only "$base...$head")"
+          printf '%s\n' "$changed"
+          relevant="$(printf '%s\n' "$changed" | grep -E '^(tabs/xml-cii-2019-standalone/|tabs/xml-cii-2019-standalone-tab\.(js|css)$|converters/xml-cii2019-core/dtxr-resolver\.js$|tests/xml-cii-standalone-.*\.test\.js$|tests/xml-cii-inputxml-enrichment-behavior\.test\.js$|tests/fixtures/xml-cii-standalone/|docs/xml-cii-2019-standalone-(production-readiness|parity|live-proof)\.md$)' || true)"
+          if [ -n "$relevant" ]; then
+            echo 'run_suite=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'run_suite=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Mission 01 not applicable to isolated UEW changes
+        if: steps.scope.outputs.run_suite != 'true'
+        run: echo 'XML CII Standalone Mission 01 is not a UEW merge gate.'
+
+      - name: Run standalone static checks
+        if: steps.scope.outputs.run_suite == 'true'
+        run: node tests/xml-cii-standalone-static.test.js
+
+      - name: Run InputXML enrichment behavior checks
+        if: steps.scope.outputs.run_suite == 'true'
+        run: node tests/xml-cii-inputxml-enrichment-behavior.test.js
+
+      - name: Run standalone workflow API checks
+        if: steps.scope.outputs.run_suite == 'true'
+        run: node tests/xml-cii-standalone-workflow-api.test.js
+
+      - name: Run standalone Import Masters checks
+        if: steps.scope.outputs.run_suite == 'true'
+        run: node tests/xml-cii-standalone-import-masters.test.js
+
+      - name: Run standalone Regex Tester checks
+        if: steps.scope.outputs.run_suite == 'true'
+        run: node tests/xml-cii-standalone-regex-tester.test.js
+
+      - name: Run standalone Resolver JSON Trace checks
+        if: steps.scope.outputs.run_suite == 'true'
+        run: node tests/xml-cii-standalone-resolver-json-trace.test.js
+
+      - name: Run DTXR_POS precedence checks
+        if: steps.scope.outputs.run_suite == 'true'
+        run: node tests/xml-cii-standalone-dtxr-pos-precedence.test.js
+
+      - name: Run standalone Manual Element Side-load checks
+        if: steps.scope.outputs.run_suite == 'true'
+        run: node tests/xml-cii-standalone-manual-element-sideload.test.js
+
+      - name: Run standalone Preview Diagnostics Audit checks
+        if: steps.scope.outputs.run_suite == 'true'
+        run: node tests/xml-cii-standalone-preview-diagnostics-audit.test.js
+
+      - name: Run standalone WM checks
+        if: steps.scope.outputs.run_suite == 'true'
+        run: node tests/xml-cii-standalone-weight-match.test.js
+
+      - name: Run standalone Support Type Mapper checks
+        if: steps.scope.outputs.run_suite == 'true'
+        run: node tests/xml-cii-standalone-support-type-mapper.test.js
+
+      - name: Run standalone Output Run checks
+        if: steps.scope.outputs.run_suite == 'true'
+        run: node tests/xml-cii-standalone-output-run.test.js
+
+      - name: Run standalone Source Mode Integration checks
+        if: steps.scope.outputs.run_suite == 'true'
+        run: node tests/xml-cii-standalone-source-mode-integration.test.js
+
+      - name: Run production readiness checks
+        if: steps.scope.outputs.run_suite == 'true'
+        run: node tests/xml-cii-standalone-production-readiness.test.js
+
+      - name: Run adapted UI checks
+        if: steps.scope.outputs.run_suite == 'true'
+        run: node tests/xml-cii-standalone-workflow-ui-adapted.test.js
+
+      - name: Run implementation guard checks
+        if: steps.scope.outputs.run_suite == 'true'
+        run: node tests/xml-cii-standalone-implementation-guard.test.js
+
+      - name: Run benchmark validation checks
+        if: steps.scope.outputs.run_suite == 'true'
+        run: node tests/xml-cii-standalone-benchmark-validation.test.js
+
+      - name: Run parity checks
+        if: steps.scope.outputs.run_suite == 'true'
+        run: node tests/xml-cii-standalone-parity.test.js
+
+      - name: Run live smoke checks
+        if: steps.scope.outputs.run_suite == 'true'
+        run: node tests/xml-cii-standalone-live-smoke.test.js

@@ -1,0 +1,54 @@
+name: InputXML Assured CII Projection
+
+on:
+  pull_request:
+    paths:
+      - 'contracts/inputxml/v1/**'
+      - 'converters/scripts/inputxml_to_cii2019.py'
+      - 'converters/scripts/inputxml_to_cii2019_assured.py'
+      - 'converters/scripts/inputxml_to_cii2019_assured_projection.py'
+      - 'converters/scripts/cii2019_*.py'
+      - 'converters/scripts/test_inputxml_to_cii2019*.py'
+      - 'tests/test_inputxml_cii_*.py'
+      - '.github/workflows/inputxml-cii-assured-projection.yml'
+  workflow_dispatch:
+
+jobs:
+  validate-assured-projection:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install projection validation runtime
+        run: python -m pip install --disable-pip-version-check jsonschema==4.23.0 lxml==5.4.0 pypdf==5.4.0
+      - name: Validate projection wrapper syntax
+        run: |
+          python -m py_compile \
+            converters/scripts/inputxml_to_cii2019.py \
+            converters/scripts/inputxml_to_cii2019_assured.py \
+            converters/scripts/inputxml_to_cii2019_assured_projection.py \
+            tests/test_inputxml_cii_assured_projection.py \
+            tests/test_inputxml_cii_assured_integration.py \
+            tests/test_inputxml_cii_projection_field_policy.py
+      - name: Run existing production-writer restraint mapping tests
+        env:
+          PYTHONPATH: converters/scripts
+        run: python -m unittest -v converters/scripts/test_inputxml_to_cii2019_restraint_mapping.py
+      - name: Run assured projection and end-to-end chain tests
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m unittest -v \
+            tests/test_inputxml_cii_assured_projection.py \
+            tests/test_inputxml_cii_assured_integration.py \
+            tests/test_inputxml_cii_projection_field_policy.py \
+            2>&1 | tee /tmp/inputxml-cii-assured-projection.log
+      - name: Upload PR-F diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: inputxml-cii-assured-projection-log
+          path: /tmp/inputxml-cii-assured-projection.log
+          if-no-files-found: warn
