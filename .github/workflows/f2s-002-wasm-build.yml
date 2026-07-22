@@ -1,0 +1,68 @@
+name: F2S-002 exact WASM build
+
+on:
+  push:
+    branches:
+      - agent/f2s-002-wasm-build
+    paths-ignore:
+      - build-output/**
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/f2s-002-wasm-build
+      - name: Install pinned compiler family
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 lld-18 wasi-libc libclang-rt-18-dev-wasm32
+      - name: Prepare pinned sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/third_party/ufbx out build-output
+          curl -fsSL https://raw.githubusercontent.com/ufbx/ufbx/729ab835444f5f229e5f7cff332692ce6c00415d/ufbx.c -o build/third_party/ufbx/ufbx.c
+          curl -fsSL https://raw.githubusercontent.com/ufbx/ufbx/729ab835444f5f229e5f7cff332692ce6c00415d/ufbx.h -o build/third_party/ufbx/ufbx.h
+          base64 -d build-input/fbx_parser.c.gz.b64 | gzip -d > build/third_party/ufbx/fbx_parser.c
+          echo 'cd7a30137b5d1b133bfc35a40ee9deb16b4c4ffb97c94879f72201ac48187dab  build/third_party/ufbx/ufbx.c' | sha256sum -c -
+          echo '447717d6cbb58d57f5abd665a00d42ada05b1d59d24cc0b26b724bd803692c23  build/third_party/ufbx/ufbx.h' | sha256sum -c -
+          echo '97dd63ae25d26cef0a8d89c8de1c804c42997e6bab8b11548164ad81d591544e  build/third_party/ufbx/fbx_parser.c' | sha256sum -c -
+      - name: Build twice and compare
+        shell: bash
+        run: |
+          set -euo pipefail
+          build_one() {
+            clang-18 --target=wasm32-wasi --sysroot=/usr -O2 -std=c99 -nostartfiles \
+              -DUFBX_WASM_32BIT -DUFBX_NO_STDIO -DUFBX_ENABLE_ERROR_STACK \
+              -Ibuild/third_party/ufbx \
+              build/third_party/ufbx/ufbx.c build/third_party/ufbx/fbx_parser.c \
+              -Wl,--no-entry -Wl,--export=malloc -Wl,--export=free \
+              -Wl,--export=fbx_parse -Wl,--export=fbx_result_ptr -Wl,--export=fbx_result_len \
+              -Wl,--export=fbx_error_ptr -Wl,--export=fbx_error_len -Wl,--export-memory \
+              -Wl,--allow-undefined -Wl,--strip-all -Wl,--initial-memory=67108864 \
+              -Wl,--max-memory=2147483648 -o "$1"
+          }
+          build_one out/fbx_parser.first.wasm
+          build_one out/fbx_parser.wasm
+          cmp out/fbx_parser.first.wasm out/fbx_parser.wasm
+          cp out/fbx_parser.wasm build-output/fbx_parser.wasm
+          clang-18 --version | tee build-output/compiler.txt
+          sha256sum out/fbx_parser.first.wasm out/fbx_parser.wasm | tee build-output/build-info.txt
+          wc -c out/fbx_parser.wasm | tee build-output/size.txt
+          echo 'ufbx revision: 729ab835444f5f229e5f7cff332692ce6c00415d' >> build-output/build-info.txt
+          echo 'C bridge SHA-256: 97dd63ae25d26cef0a8d89c8de1c804c42997e6bab8b11548164ad81d591544e' >> build-output/build-info.txt
+      - name: Publish verified build to temporary branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add build-output
+          git commit -m 'build: publish exact F2S-002 WASM'
+          git push origin HEAD:agent/f2s-002-wasm-build
